@@ -81,23 +81,39 @@ async function main() {
     const reportsDir = join(process.cwd(), 'reports');
     await fs.mkdir(reportsDir, { recursive: true });
 
-    // Save reports with consistent naming
+    // Save reports with PR-specific naming (required format)
     const basename = `${owner}_${repo}_${prNumber}`;
-    const mdPath = join(reportsDir, `${basename}.md`);
-    const htmlPath = join(reportsDir, `${basename}.html`);
-    const jsonPath = join(reportsDir, `${basename}.json`);
+    const prSpecificMdPath = join(reportsDir, `${basename}.md`);
+    const prSpecificHtmlPath = join(reportsDir, `${basename}.html`);
+    const prSpecificJsonPath = join(reportsDir, `${basename}.json`);
 
+    // Also save with canonical filenames (optional - helps reviewers identify final run)
+    const canonicalMdPath = join(reportsDir, 'report.md');
+    const canonicalHtmlPath = join(reportsDir, 'report.html');
+    const canonicalJsonPath = join(reportsDir, 'report.json');
+
+    // Write both PR-specific and canonical filenames
     await Promise.all([
-      fs.writeFile(mdPath, markdownReport, 'utf-8'),
-      fs.writeFile(htmlPath, htmlReport, 'utf-8'),
-      fs.writeFile(jsonPath, jsonReport, 'utf-8')
+      // PR-specific filenames (required)
+      fs.writeFile(prSpecificMdPath, markdownReport, 'utf-8'),
+      fs.writeFile(prSpecificHtmlPath, htmlReport, 'utf-8'),
+      fs.writeFile(prSpecificJsonPath, jsonReport, 'utf-8'),
+      // Canonical filenames (optional - latest run)
+      fs.writeFile(canonicalMdPath, markdownReport, 'utf-8'),
+      fs.writeFile(canonicalHtmlPath, htmlReport, 'utf-8'),
+      fs.writeFile(canonicalJsonPath, jsonReport, 'utf-8')
     ]);
 
     console.log(`\n✅ Report generated successfully!\n`);
-    console.log(`📄 Reports saved to ${reportsDir}/:`);
+    console.log(`📄 Reports saved to ${reportsDir}/:\n`);
+    console.log(`   PR-Specific files (${basename}):`)
     console.log(`   - ${basename}.md`);
     console.log(`   - ${basename}.html`);
     console.log(`   - ${basename}.json\n`);
+    console.log(`   Latest run (canonical names):`)
+    console.log(`   - report.md (← Use this for review)`);
+    console.log(`   - report.html`);
+    console.log(`   - report.json\n`);
 
     logger.info(
       `Code review report generated for ${owner}/${repo}#${prNumber}`

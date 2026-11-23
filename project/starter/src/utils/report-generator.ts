@@ -17,6 +17,32 @@ export class ReportGenerator {
   }
 
   /**
+   * Normalize priority values - handles uppercase, lowercase, and missing values
+   */
+  private normalizePriority(priority: unknown): 'critical' | 'high' | 'medium' | 'low' {
+    const value = String(priority ?? 'low').toLowerCase();
+    return ['critical', 'high', 'medium', 'low'].includes(value)
+      ? (value as 'critical' | 'high' | 'medium' | 'low')
+      : 'low';
+  }
+
+  /**
+   * Extract issue description from various field names
+   */
+  private issueText(issue: any): string {
+    return issue.description ?? issue.message ?? issue.issue ?? issue.title ?? 'No issue description provided';
+  }
+
+  /**
+   * Extract duration in milliseconds, handling different field formats
+   */
+  private durationMs(metadata: any): number {
+    if (typeof metadata?.duration === 'number') return metadata.duration;
+    if (typeof metadata?.duration_seconds === 'number') return metadata.duration_seconds * 1000;
+    return 0;
+  }
+
+  /**
    * Generate a Markdown report for PR comments
    */
   generateMarkdownReport(report: ReviewReport): string {
@@ -31,12 +57,13 @@ export class ReportGenerator {
                                     (summary as any)?.refactoringMetrics?.refactoringOpportunities ?? 0;
 
     const formattedRecs = recommendations.slice(0, 5).map((rec, idx) => {
+      const normalizedPriority = this.normalizePriority(rec.priority);
       const emoji = {
         critical: '🚨',
         high: '⚠️',
         medium: '📝',
         low: '💡'
-      }[rec.priority];
+      }[normalizedPriority];
 
       return `${idx + 1}. ${emoji} **${rec.category}**: ${rec.description}
    - Files: ${rec.files.join(', ')}`;
@@ -45,33 +72,44 @@ export class ReportGenerator {
     const formattedFiles = fileReviews.map(review => {
       const { file, codeQuality, testCoverage, refactorings } = review;
 
-      const issueList = (codeQuality?.issues || []).slice(0, 3)
-        .map((i: any) => `  - Line ${i.line}: \`${i.severity}\` ${i.description}`)
+      // Ensure issues is always an array
+      const issues = Array.isArray(codeQuality?.issues) ? codeQuality.issues : [];
+      const issueList = issues.slice(0, 3)
+        .map((i: any) => `  - Line ${i.line ?? i.lineNumber ?? 'N/A'}: \`${i.severity ?? 'unknown'}\` ${this.issueText(i)}`)
         .join('\n');
 
-      const testList = (testCoverage?.untestedPaths || []).slice(0, 2)
-        .map((p: any) => `  - \`${p.location}\` (${p.priority} priority)`)
+      // Ensure untestedPaths is always an array (handle both schema names and actual data names)
+      const untestedPaths = Array.isArray(testCoverage?.untestedPaths) ? testCoverage.untestedPaths :
+                           (Array.isArray((testCoverage as any)?.uncoveredScenarios) ? (testCoverage as any).uncoveredScenarios : []);
+      const testList = untestedPaths.slice(0, 2)
+        .map((p: any) => `  - \`${p.location ?? p.functionName ?? 'unknown'}\` (${this.normalizePriority(p.priority ?? p.criticality ?? 'low')} priority)`)
         .join('\n');
 
-      const refactorList = (refactorings?.suggestions || []).slice(0, 2)
-        .map((s: any) => `  - **${s.type}**: ${s.description}`)
+      // Ensure suggestions is always an array (handle both schema names and actual data names)
+      const suggestions = Array.isArray(refactorings?.suggestions) ? refactorings.suggestions :
+                         (Array.isArray((refactorings as any)?.opportunities) ? (refactorings as any).opportunities : []);
+      const refactorList = suggestions.slice(0, 2)
+        .map((s: any) => `  - **${s.type ?? 'unknown'}**: ${s.description ?? s.suggestion ?? 'No description'}`)
         .join('\n');
+
+      const qualityScore = (codeQuality?.overallScore ?? (codeQuality as any)?.score) || 'N/A';
+      const coverageEstimate = (testCoverage?.coverageEstimate ?? (testCoverage as any)?.estimatedCoverage) || 'N/A';
 
       return `### 📄 \`${file}\`
 
-**Quality Score:** ${codeQuality?.overallScore || 'N/A'}/100 | **Coverage:** ~${testCoverage?.coverageEstimate || 'N/A'}%
+**Quality Score:** ${qualityScore}/100 | **Coverage:** ~${coverageEstimate}%
 
-#### Issues (${(codeQuality?.issues || []).length})
+#### Issues (${issues.length})
 ${issueList || '  None found'}
-${(codeQuality?.issues?.length || 0) > 3 ? `\n  *...and ${(codeQuality?.issues?.length || 0) - 3} more*` : ''}
+${issues.length > 3 ? `\n  *...and ${issues.length - 3} more*` : ''}
 
-#### Test Gaps (${(testCoverage?.untestedPaths || []).length})
+#### Test Gaps (${untestedPaths.length})
 ${testList || '  None found'}
-${(testCoverage?.untestedPaths?.length || 0) > 2 ? `\n  *...and ${(testCoverage?.untestedPaths?.length || 0) - 2} more*` : ''}
+${untestedPaths.length > 2 ? `\n  *...and ${untestedPaths.length - 2} more*` : ''}
 
-#### Refactoring Opportunities (${(refactorings?.suggestions || []).length})
+#### Refactoring Opportunities (${suggestions.length})
 ${refactorList || '  None found'}
-${(refactorings?.suggestions?.length || 0) > 2 ? `\n  *...and ${(refactorings?.suggestions?.length || 0) - 2} more*` : ''}`;
+${suggestions.length > 2 ? `\n  *...and ${suggestions.length - 2} more*` : ''}`;
     }).join('\n\n---\n\n');
 
     return `# 🔍 Code Review Report
@@ -96,7 +134,7 @@ ${formattedFiles}
 
 ---
 
-*Generated at ${report.metadata.analyzedAt} • Duration: ${report.metadata.duration}ms*
+*Generated at ${report.metadata.analyzedAt} • Duration: ${this.durationMs(report.metadata)}ms*
 `;
   }
 
@@ -114,13 +152,16 @@ ${formattedFiles}
     const refactoringOpportunities = (summary as any)?.refactoringOpportunities ??
                                     (summary as any)?.refactoringMetrics?.refactoringOpportunities ?? 0;
 
-    const recList = recommendations.slice(0, 5).map(r => `
-      <li class="rec-${r.priority}">
-        <span class="priority">[${r.priority.toUpperCase()}]</span>
+    const recList = recommendations.slice(0, 5).map(r => {
+      const normalizedPriority = this.normalizePriority(r.priority);
+      return `
+      <li class="rec-${normalizedPriority}">
+        <span class="priority">[${normalizedPriority.toUpperCase()}]</span>
         <strong>${r.category}</strong>: ${r.description}
         <br><small>Files: ${r.files.join(', ')}</small>
       </li>
-    `).join('');
+    `;
+    }).join('');
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -196,7 +237,7 @@ ${formattedFiles}
   <ul>${recList || '<li>No recommendations at this time.</li>'}</ul>
 
   <footer>
-    Generated at ${metadata.analyzedAt} • Duration: ${metadata.duration}ms
+    Generated at ${metadata.analyzedAt} • Duration: ${this.durationMs(metadata)}ms
   </footer>
 </body>
 </html>`;
