@@ -8,14 +8,15 @@
   "exports": {
     ".": "./dist/main.js"
   },
-  "author": "Udacity",
+  "author": "Bharath",
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/main.ts",
     "start": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "generate-demo-reports": "tsx src/generate-demo-reports.ts"
   },
   "keywords": [
     "claude",
